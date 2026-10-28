@@ -6,12 +6,17 @@ import json
 import os
 import sqlite3
 import time
-from html import escape
-from urllib.parse import parse_qsl, urlparse
+from urllib.parse import parse_qsl
 
-from aiogram import Bot, Dispatcher, F
+from aiogram import Bot, Dispatcher
 from aiogram.filters import CommandStart
-from aiogram.types import Message, WebAppInfo, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import (
+    Message,
+    WebAppInfo,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    BusinessConnection,
+)
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -27,6 +32,7 @@ if not BOT_TOKEN:
 
 app = FastAPI(title="Fragment Mini App")
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
 bot = Bot(BOT_TOKEN)
 dp = Dispatcher()
 
@@ -82,7 +88,7 @@ def verify_init_data(init_data: str):
         raise HTTPException(401, "Invalid Telegram auth date.")
 
     if abs(int(time.time()) - auth_date) > 86400:
-        raise HTTPException(401, "Telegram session expired. Reopen the app.")
+        raise HTTPException(401, "Telegram session expired.")
 
     data_check_string = "\n".join(
         f"{k}={v}" for k, v in sorted(values.items())
@@ -130,93 +136,41 @@ async def start(message: Message):
 
     await message.answer(
         "Привет! Это Fragment.\n\n"
-        "Команда для оформления сообщения в группе:\n"
-        "!оффер ССЫЛКА ЦЕНА ВАЛЮТА\n\n"
-        "Пример:\n"
+        "Черновики NFT-офферов можно готовить в приложении.\n"
+        "Пример команды:\n"
         "!оффер https://t.me/nft/Example 500 Stars\n\n"
-        "Валюты: Stars, GRAM, USDT.\n"
-        "Команда создаёт оформленное сообщение, "
-        "но не настоящий системный NFT-оффер.",
+        "Важно: оформление сообщения не создаёт настоящий "
+        "системный NFT-оффер.",
         reply_markup=keyboard
     )
 
 
-@dp.message(F.text.regexp(r"(?i)^!оффер(?:\s|$)"))
-async def create_chat_offer(message: Message):
-    parts = (message.text or "").strip().split()
-
-    if len(parts) != 4:
-        await message.reply(
-            "Формат команды:\n"
-            "!оффер ССЫЛКА ЦЕНА ВАЛЮТА\n"
-            "Пример: !оффер https://t.me/nft/Example 500 Stars"
-        )
-        return
-
-    _, link, price, currency_input = parts
-    currency_key = currency_input.upper()
-
-    currencies = {
-        "STARS": "⭐ Stars",
-        "STAR": "⭐ Stars",
-        "⭐": "⭐ Stars",
-        "GRAM": "GRAM",
-        "USDT": "USDT",
-    }
-
-    if currency_key not in currencies:
-        await message.reply("Валюта должна быть Stars, GRAM или USDT.")
-        return
-
-    try:
-        parsed = urlparse(link)
-
-        allowed_hosts = {
-            "t.me", "www.t.me", "telegram.me", "www.telegram.me",
-            "fragment.com", "www.fragment.com"
-        }
-
-        if parsed.scheme != "https" or parsed.hostname not in allowed_hosts:
-            raise ValueError
-
-        amount = float(price.replace(",", "."))
-
-        if not (0 < amount < 1e15):
-            raise ValueError
-
-    except ValueError:
-        await message.reply(
-            "Проверь ссылку и цену. Нужна HTTPS-ссылка "
-            "на поддерживаемый домен и цена больше нуля."
-        )
-        return
-
-    sender = message.from_user
-    if sender and sender.username:
-        sender_name = "@" + sender.username
-    elif sender:
-        sender_name = sender.full_name
-    else:
-        sender_name = "Пользователь"
-
-    offer_text = (
-        "🎁 <b>NFT OFFER</b>\n\n"
-        f'🔗 <a href="{escape(link, quote=True)}">Открыть NFT</a>\n\n'
-        f"💰 <b>Цена:</b> {escape(price)} "
-        f"{escape(currencies[currency_key])}\n"
-        f"👤 <b>Отправитель:</b> {escape(sender_name)}"
+# Диагностика Business-подключения.
+# Эти обработчики ничего не удаляют и не отправляют.
+@dp.business_connection()
+async def on_business_connection(connection: BusinessConnection):
+    print(
+        "BUSINESS CONNECTION:",
+        "id =", connection.id,
+        "enabled =", connection.is_enabled,
+        "rights =", connection.rights,
+        flush=True,
     )
 
-    # Удаление команды сработает, если у бота есть необходимые права.
-    try:
-        await message.delete()
-    except Exception:
-        pass
 
-    await message.answer(
-        offer_text,
-        parse_mode="HTML",
-        disable_web_page_preview=False
+@dp.business_message()
+async def on_business_message(message: Message):
+    print(
+        "BUSINESS MESSAGE:",
+        "chat_id =", message.chat.id,
+        "message_id =", message.message_id,
+        "from_user_id =",
+        message.from_user.id if message.from_user else None,
+        "text =", repr(message.text),
+        "connection_id =", message.business_connection_id,
+        "is_outgoing =", message.from_user.is_bot
+        if message.from_user else None,
+        flush=True,
     )
 
 
@@ -260,11 +214,9 @@ async def save_settings(request: Request):
     }
 
     clean = {}
-
     for key, typ in allowed.items():
         if key in data:
             value = data[key]
-
             if typ is bool:
                 clean[key] = int(bool(value))
             elif isinstance(value, str):
@@ -272,19 +224,15 @@ async def save_settings(request: Request):
 
     if clean.get("language") not in (None, "RU", "EN"):
         raise HTTPException(400, "Unsupported language")
-
     if clean.get("text_style") not in (None, "default", "original"):
         raise HTTPException(400, "Unsupported text style")
-
     if clean.get("buttons_layout") not in (None, "side", "stacked"):
         raise HTTPException(400, "Unsupported button layout")
-
     if clean.get("image_position") not in (None, "above", "below"):
         raise HTTPException(400, "Unsupported image position")
 
     if clean:
         columns = ", ".join(f"{k}=?" for k in clean)
-
         with db() as conn:
             conn.execute(
                 "INSERT OR IGNORE INTO settings(user_id) VALUES (?)",
@@ -309,10 +257,8 @@ async def create_draft(request: Request):
 
     if not links or not price:
         raise HTTPException(400, "Укажи ссылку на подарок и цену.")
-
     if currency not in ("Stars", "GRAM", "USDT"):
         raise HTTPException(400, "Неизвестная валюта.")
-
     if len(links) > 5000 or len(price) > 40:
         raise HTTPException(400, "Слишком длинное значение.")
 
@@ -355,14 +301,20 @@ async def main():
         app,
         host="0.0.0.0",
         port=PORT,
-        log_level="info"
+        log_level="info",
     )
     server = uvicorn.Server(config)
 
-    await asyncio.gather(
-        dp.start_polling(bot),
-        server.serve()
-    )
+    try:
+        await asyncio.gather(
+            dp.start_polling(
+                bot,
+                allowed_updates=dp.resolve_used_update_types(),
+            ),
+            server.serve(),
+        )
+    finally:
+        await bot.session.close()
 
 
 if __name__ == "__main__":
