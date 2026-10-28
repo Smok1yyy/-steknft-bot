@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Gift Offer</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root{color-scheme:dark;--bg:#080808;--card:#111;--stroke:#292929;--muted:#8c8c93;--white:#f5f5f7;--accent:#343434;--green:#47c879}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--white);font-family:Arial,Helvetica,sans-serif;font-size:15px}
+.wrap{max-width:720px;margin:0 auto;padding:18px 14px 100px}.profile,.panel{background:var(--card);border:1px solid var(--stroke);border-radius:28px;padding:20px;margin-bottom:18px}
+.profile{display:flex;align-items:center;gap:14px}.avatar{width:54px;height:54px;border-radius:50%;display:grid;place-items:center;background:#252525;font-size:24px}.muted{color:var(--muted)}.pill{border:1px solid #444;border-radius:30px;padding:8px 12px;margin-left:auto;font-weight:bold}
+h2{font-size:13px;letter-spacing:.06em;color:#999;margin:4px 0 18px;text-transform:uppercase}label{display:block;color:#aaa;font-weight:600;margin:16px 0 8px}
+input,textarea,select{width:100%;border:1px solid #292929;background:#191919;color:#f6f6f6;border-radius:18px;padding:15px;font-size:16px;outline:none}textarea{min-height:105px;resize:vertical}
+button{border:1px solid #555;background:#343434;color:#fff;border-radius:16px;padding:14px 16px;font-size:15px;font-weight:700;cursor:pointer}button:active{opacity:.8}.wide{width:100%;margin-top:16px}.seg{display:flex;gap:4px;background:#080808;border:1px solid #222;border-radius:18px;padding:5px}.seg button{flex:1;background:transparent;border-color:transparent;color:#888}.seg button.active{background:#333;border-color:#666;color:#fff}.tabs{position:fixed;bottom:10px;left:50%;transform:translateX(-50%);width:min(94%,690px);display:flex;gap:6px;padding:8px;background:#101012ed;border:1px solid #383838;border-radius:36px;backdrop-filter:blur(12px);z-index:4}.tabs button{flex:1;border:0;background:transparent;color:#888;padding:12px 4px}.tabs button.active{background:#343434;border:1px solid #555;border-radius:28px;color:#fff}.tab-icon{display:block;font-size:20px;margin-bottom:5px}.preview{border:1px solid #333;border-radius:22px;background:#111b25;padding:12px;margin-top:18px}.gift{background:#28313d;border-left:4px solid #e59b91;border-radius:12px;padding:15px}.gift-img{height:145px;background:linear-gradient(135deg,#c67b65,#e0a18a);border-radius:14px;display:grid;place-items:center;font-size:58px;margin:12px 0}.caption{color:#e59b91;text-align:center;font-weight:bold;padding:8px}.actions{display:flex;gap:8px}.actions button{flex:1;background:#202d3a;border-color:#344251}.status{margin-top:12px;color:var(--green);font-size:13px}.hidden{display:none!important}.contact{border:1px solid #292929;background:#191919;border-radius:16px;padding:14px;margin-top:8px}.small{font-size:13px}.notice{color:#aaa;font-size:13px;line-height:1.45;margin-top:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="profile">
+    <div class="avatar">?</div>
+    <div><strong id="profileName">Telegram user</strong><div class="muted" id="profileUsername">@username</div></div>
+    <div class="pill">@steknft</div>
+  </div>
+
+  <section id="chats" class="panel page hidden">
+    <h2>Личные чаты</h2>
+    <div class="muted small">Черновики и получатели, которых ты добавишь вручную</div>
+    <label>Поиск по username или имени</label>
+    <input id="searchContact" placeholder="@username">
+    <div class="contact"><strong>Получатель</strong><div class="muted small">Введи username в настройках. Поиск не читает личные чаты Telegram автоматически.</div></div>
+    <label>Последние черновики</label>
+    <div id="draftList" class="muted">Пока нет черновиков.</div>
+  </section>
+
+  <section id="offer" class="panel page">
+    <h2>Отправка оффера · черновик</h2>
+    <label>Ссылки на подарки</label>
+    <textarea id="links" placeholder="Вставь одну или несколько ссылок&#10;https://t.me/nft/KissedFrog-940"></textarea>
+    <label>Цена</label>
+    <input id="price" inputmode="decimal" placeholder="5000">
+    <label>Валюта</label>
+    <div class="seg" id="currencySeg">
+      <button class="active" data-value="Stars">Stars</button><button data-value="GRAM">GRAM</button><button data-value="USDT">USDT</button>
+    </div>
+    <button class="wide" id="saveDraft">Сохранить черновик и показать превью</button>
+    <div class="notice">Этот этап сохраняет черновик и готовит текст. Он не отправляет настоящий NFT-оффер и не переводит средства.</div>
+    <div class="preview" id="preview">
+      <div class="gift">
+        <strong style="color:#e59b91">Telegram</strong>
+        <div id="giftName" style="font-weight:bold;margin-top:5px">NFT Gift</div>
+        <div class="gift-img" id="giftEmoji">🎁</div>
+        <div class="caption" id="giftButton">ПОКАЗАТЬ ПОДАРОК</div>
+      </div>
+      <p id="offerText" style="font-weight:bold;line-height:1.5">Пользователь (@username) предлагает вам 5000 ⭐ за подарок NFT Gift</p>
+      <p class="muted">Черновик — не реальная сделка</p>
+      <div class="actions"><button id="copyText">Копировать текст</button><button id="shareText">Поделиться</button></div>
+      <div class="status" id="status"></div>
+    </div>
+  </section>
+
+  <section id="settings" class="panel page hidden">
+    <h2>Настройки</h2>
+    <label>Username получателя подарков</label>
+    <input id="receiver" placeholder="@username">
+    <label>Язык карточек</label>
+    <div class="seg" id="languageSeg"><button class="active" data-value="RU">Русский</button><button data-value="EN">English</button></div>
+    <label>Вариант текста оффера</label>
+    <div class="seg" id="textStyleSeg"><button data-value="default">Default</button><button class="active" data-value="original">Original</button></div>
+    <label>Стиль шрифта текста</label>
+    <div class="seg" id="boldSeg"><button data-value="false">Default</button><button class="active" data-value="true">Жирный</button></div>
+    <label>Расположение кнопок</label>
+    <div class="seg" id="layoutSeg"><button class="active" data-value="side">Рядом</button><button data-value="stacked">Друг над другом</button></div>
+    <label>Свой текст на кнопках</label>
+    <div class="actions"><input id="acceptText" placeholder="Принять"><input id="rejectText" placeholder="Отклонить"></div>
+    <label>Иконки на кнопках</label>
+    <div class="seg" id="iconsSeg"><button class="active" data-value="false">Чистый текст</button><button data-value="true">С иконками ✅❌</button></div>
+    <label>Превью «Показать подарок»</label>
+    <div class="seg" id="previewSeg"><button class="active" data-value="true">Показать превью</button><button data-value="false">Скрыть превью</button></div>
+    <label>Позиция картинки подарка</label>
+    <div class="seg" id="imagePosSeg"><button data-value="below">Под текстом</button><button class="active" data-value="above">Над текстом</button></div>
+    <button class="wide" id="saveSettings">Сохранить настройки</button>
+    <div class="status" id="settingsStatus"></div>
+  </section>
+</div>
+<nav class="tabs">
+  <button data-tab="chats"><span class="tab-icon">●</span>Чаты</button>
+  <button class="active" data-tab="offer"><span class="tab-icon">☷</span>Оффер</button>
+  <button data-tab="settings"><span class="tab-icon">⚙</span>Настройки</button>
+</nav>
+<script>
+const tg = window.Telegram?.WebApp;
+tg?.ready(); tg?.expand();
+const initData = tg?.initData || "";
+const headers = {"Content-Type":"application/json","X-Telegram-Init-Data":initData};
+let currency = "Stars";
+const state = {language:"RU",text_style:"original",bold:true,buttons_layout:"side",icons:false,preview:true,image_position:"above"};
+if (tg?.initDataUnsafe?.user) {
+  const u = tg.initDataUnsafe.user;
+  document.getElementById("profileName").textContent = [u.first_name,u.last_name].filter(Boolean).join(" ") || "Telegram user";
+  document.getElementById("profileUsername").textContent = u.username ? "@"+u.username : "Telegram user";
+}
+function setSegment(id,value){const el=document.getElementById(id);if(!el)return;el.querySelectorAll("button").forEach(b=>b.classList.toggle("active",b.dataset.value===String(value)));}
+function segmentValue(id){return document.querySelector(`#${id} button.active`)?.dataset.value;}
+document.querySelectorAll(".tabs button").forEach(b=>b.addEventListener("click",()=>{
+ document.querySelectorAll(".tabs button").forEach(x=>x.classList.toggle("active",x===b));
+ document.querySelectorAll(".page").forEach(x=>x.classList.toggle("hidden",x.id!==b.dataset.tab));
+}));
+document.querySelectorAll(".seg").forEach(seg=>seg.querySelectorAll("button").forEach(b=>b.addEventListener("click",()=>{
+ seg.querySelectorAll("button").forEach(x=>x.classList.toggle("active",x===b));
+ if(seg.id==="currencySeg"){currency=b.dataset.value;updatePreview();}
+})));
+function updatePreview(){
+ const links=document.getElementById("links").value.trim();
+ const first=links.split(/\s+/)[0]||"";
+ const name=first.split("/").pop()||"NFT Gift";
+ document.getElementById("giftName").textContent=name;
+ document.getElementById("offerText").textContent=`Пользователь (${document.getElementById("receiver").value||"@username"}) предлагает вам ${document.getElementById("price").value||"—"} ${currency==="Stars"?"⭐":currency} за подарок ${name}`;
+ document.getElementById("preview").classList.toggle("hidden",state.preview===false);
+}
+["links","price","receiver"].forEach(id=>document.getElementById(id).addEventListener("input",updatePreview));
+document.getElementById("saveSettings").addEventListener("click",async()=>{
+ const data={receiver:document.getElementById("receiver").value,language:segmentValue("languageSeg"),text_style:segmentValue("textStyleSeg"),bold:segmentValue("boldSeg")==="true",buttons_layout:segmentValue("layoutSeg"),accept_text:document.getElementById("acceptText").value||"Принять",reject_text:document.getElementById("rejectText").value||"Отклонить",icons:segmentValue("iconsSeg")==="true",preview:segmentValue("previewSeg")==="true",image_position:segmentValue("imagePosSeg")};
+ try{const r=await fetch("/api/settings",{method:"POST",headers,body:JSON.stringify(data)});if(!r.ok)throw new Error((await r.json()).detail||"Ошибка");document.getElementById("settingsStatus").textContent="Настройки сохранены.";Object.assign(state,data);updatePreview();}catch(e){document.getElementById("settingsStatus").textContent=e.message+" — открой Mini App через бота после деплоя.";}
+});
+document.getElementById("saveDraft").addEventListener("click",async()=>{
+ const data={links:document.getElementById("links").value,price:document.getElementById("price").value,currency};
+ try{const r=await fetch("/api/drafts",{method:"POST",headers,body:JSON.stringify(data)});if(!r.ok)throw new Error((await r.json()).detail||"Ошибка");const out=await r.json();document.getElementById("status").textContent=`Черновик #${out.draft_id} сохранён. Оффер не отправлен.`;updatePreview();loadDrafts();}catch(e){document.getElementById("status").textContent=e.message+" — Mini App должен быть открыт через Telegram.";}
+});
+document.getElementById("copyText").addEventListener("click",async()=>{
+ const text=document.getElementById("offerText").textContent;
+ try{await navigator.clipboard.writeText(text);document.getElementById("status").textContent="Текст скопирован.";}catch(e){tg?.showPopup?.({message:text});}
+});
+document.getElementById("shareText").addEventListener("click",()=>{const text=document.getElementById("offerText").textContent;if(tg?.switchInlineQuery)tg.switchInlineQuery(text,[]);else if(navigator.share)navigator.share({text});else document.getElementById("status").textContent="Скопируй текст вручную и отправь его в нужный чат.";});
+async function loadSettings(){
+ try{const r=await fetch("/api/settings",{headers});if(!r.ok)return;const s=await r.json();
+ document.getElementById("receiver").value=s.receiver||"";document.getElementById("acceptText").value=s.accept_text||"";document.getElementById("rejectText").value=s.reject_text||"";
+ setSegment("languageSeg",s.language||"RU");setSegment("textStyleSeg",s.text_style||"original");setSegment("boldSeg",String(!!s.bold));setSegment("layoutSeg",s.buttons_layout||"side");setSegment("iconsSeg",String(!!s.icons));setSegment("previewSeg",String(!!s.preview));setSegment("imagePosSeg",s.image_position||"above");Object.assign(state,s);updatePreview();
+ }catch(e){}
+}
+async function loadDrafts(){
+ try{const r=await fetch("/api/drafts",{headers});if(!r.ok)return;const data=await r.json();const box=document.getElementById("draftList");box.innerHTML="";
+ if(!data.drafts.length){box.textContent="Пока нет черновиков.";return;}
+ data.drafts.forEach(d=>{const el=document.createElement("div");el.className="contact";el.textContent=`#${d.id} · ${d.price} ${d.currency} · ${d.links.slice(0,70)}`;box.appendChild(el);});
+ }catch(e){}
+}
+loadSettings();loadDrafts();updatePreview();
+</script>
+</body>
+</html>
