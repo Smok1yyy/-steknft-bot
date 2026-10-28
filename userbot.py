@@ -3,8 +3,8 @@ import os
 import asyncio
 from telethon import TelegramClient, events
 
-API_ID = int(os.environ["38457834"])
-API_HASH = os.environ["719a0b0b8b0f298ce02663ff3d99fde2"]
+API_ID = int(os.environ["API_ID"])
+API_HASH = os.environ["API_HASH"]
 SESSION = os.environ.get("SESSION_NAME", "fragment_user")
 
 client = TelegramClient(SESSION, API_ID, API_HASH)
