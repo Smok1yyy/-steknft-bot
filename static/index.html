@@ -3,40 +3,296 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>StekNft</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fragment</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
+    * { box-sizing: border-box; }
     body {
       margin: 0;
-      padding: 24px;
-      background: #111318;
-      color: white;
+      padding: 20px;
+      background: #0b0b12;
+      color: #f5f3ff;
       font-family: Arial, sans-serif;
     }
-    .card {
-      padding: 20px;
-      background: #20232b;
-      border-radius: 16px;
+    .app { max-width: 480px; margin: auto; }
+    .logo { color: #a78bfa; font-size: 27px; font-weight: bold; }
+    .subtitle { color: #9292a7; margin-top: 6px; }
+    .balance {
+      margin-top: 24px;
+      padding: 22px;
+      border-radius: 18px;
+      background: linear-gradient(135deg, #37216b, #17152b);
+      border: 1px solid #514080;
     }
-    h1 { color: #a78bfa; }
+    .muted { color: #aaa6c0; font-size: 13px; }
+    .amount { font-size: 30px; font-weight: bold; margin-top: 10px; }
+    .section-title { margin: 25px 0 12px; font-size: 18px; }
+    .card {
+      padding: 17px;
+      margin-bottom: 12px;
+      border-radius: 15px;
+      background: #171722;
+      border: 1px solid #29283a;
+    }
     button {
       width: 100%;
       padding: 14px;
-      margin-top: 12px;
+      margin-top: 10px;
       border: 0;
-      border-radius: 10px;
+      border-radius: 11px;
       background: #8b5cf6;
       color: white;
-      font-size: 16px;
+      font-size: 15px;
+      font-weight: bold;
+      cursor: pointer;
     }
+    button.secondary {
+      background: #242333;
+      border: 1px solid #39364f;
+    }
+    input, textarea, select {
+      display: block;
+      width: 100%;
+      margin-top: 10px;
+      padding: 13px;
+      color: white;
+      background: #101019;
+      border: 1px solid #39364f;
+      border-radius: 10px;
+      font-size: 14px;
+    }
+    textarea { min-height: 75px; resize: vertical; }
+    .page { display: none; }
+    .page.active { display: block; }
+    .nav {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 7px;
+      margin-top: 22px;
+    }
+    .nav button { padding: 12px 3px; font-size: 12px; }
+    .notice {
+      margin-top: 16px;
+      color: #aaa6c0;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .status { color: #c4b5fd; margin-top: 10px; font-size: 13px; }
   </style>
 </head>
 <body>
-  <div class="card">
-    <h1>FragmeNT</h1>
-    <p>Приложение запущено.</p>
-    <button onclick="alert('Приложение работает!')">Проверить</button>
-  </div>
-</body>
-</html>
+<div class="app">
+  <div class="logo">◈ Fragment</div>
+  <div class="subtitle">Telegram collectibles dashboard</div>
 
+  <div class="nav">
+    <button onclick="showPage('home')">Главная</button>
+    <button onclick="showPage('offers')">Офферы</button>
+    <button onclick="showPage('automation')">Авто</button>
+    <button onclick="showPage('profile')">Профиль</button>
+  </div>
+
+  <section id="home" class="page active">
+    <div class="balance">
+      <div class="muted">Панель Fragment</div>
+      <div class="amount">Добро пожаловать</div>
+      <div class="muted">Управление офферами и правилами</div>
+    </div>
+
+    <div class="section-title">Быстрые действия</div>
+    <div class="card">
+      <b>Создать оффер</b>
+      <p class="muted">Подготовь данные для предложения по NFT.</p>
+      <button onclick="showPage('offers')">Открыть офферы</button>
+    </div>
+    <div class="card">
+      <b>Правила автоматизации</b>
+      <p class="muted">Сохраняй свои настройки на этом устройстве.</p>
+      <button class="secondary" onclick="showPage('automation')">Настроить</button>
+    </div>
+    <div class="notice">
+      Прототип интерфейса. Реальное создание офферов и автоматическое сканирование NFT пока не подключены.
+    </div>
+  </section>
+
+  <section id="offers" class="page">
+    <div class="section-title">Создать оффер</div>
+    <div class="card">
+      <label>Название NFT</label>
+      <input id="nftName" placeholder="Например, название подарка">
+      <label>Цена</label>
+      <input id="nftPrice" type="number" min="0" placeholder="Цена в TON">
+      <label>Ссылка или описание</label>
+      <textarea id="nftLink" placeholder="Вставь ссылку или детали NFT"></textarea>
+      <button onclick="saveOffer()">Сохранить черновик</button>
+      <div id="offerStatus" class="status"></div>
+    </div>
+    <div class="section-title">Мои черновики</div>
+    <div id="offerList"></div>
+  </section>
+
+  <section id="automation" class="page">
+    <div class="section-title">Автоматизация</div>
+    <div class="card">
+      <label>Название правила</label>
+      <input id="ruleName" placeholder="Моё правило">
+      <label>Максимальная цена в TON</label>
+      <input id="rulePrice" type="number" min="0" placeholder="Например, 10">
+      <button onclick="saveRule()">Сохранить правило</button>
+      <div id="ruleStatus" class="status"></div>
+    </div>
+    <div class="section-title">Сохранённые правила</div>
+    <div id="ruleList"></div>
+    <div class="notice">
+      Правила пока только сохраняются локально. Они не покупают NFT и не отправляют офферы автоматически.
+    </div>
+  </section>
+
+  <section id="profile" class="page">
+    <div class="section-title">Профиль</div>
+    <div class="card">
+      <div class="muted">Telegram-пользователь</div>
+      <p id="userName">Открыто в браузере или Telegram</p>
+      <div class="muted">Приложение</div>
+      <p>Fragment</p>
+      <button class="secondary" onclick="clearData()">Очистить локальные данные</button>
+    </div>
+  </section>
+</div>
+
+<script>
+  const tg = window.Telegram && window.Telegram.WebApp;
+  if (tg) {
+    tg.ready();
+    tg.expand();
+    const user = tg.initDataUnsafe && tg.initDataUnsafe.user;
+    if (user) {
+      document.getElementById('userName').textContent =
+        user.first_name + (user.username ? ' (@' + user.username + ')' : '');
+    }
+  }
+
+  function showPage(id) {
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.getElementById(id).classList.add('active');
+    renderOffers();
+    renderRules();
+  }
+
+  function read(key) {
+    try { return JSON.parse(localStorage.getItem(key) || '[]'); }
+    catch (e) { return []; }
+  }
+
+  function saveOffer() {
+    const name = document.getElementById('nftName').value.trim();
+    const price = document.getElementById('nftPrice').value.trim();
+    const link = document.getElementById('nftLink').value.trim();
+    if (!name || !price) {
+      document.getElementById('offerStatus').textContent = 'Укажи название и цену.';
+      return;
+    }
+    const offers = read('fragment_offers');
+    offers.unshift({name, price, link});
+    localStorage.setItem('fragment_offers', JSON.stringify(offers));
+    document.getElementById('nftName').value = '';
+    document.getElementById('nftPrice').value = '';
+    document.getElementById('nftLink').value = '';
+    document.getElementById('offerStatus').textContent = 'Черновик сохранён.';
+    renderOffers();
+  }
+
+  function renderOffers() {
+    const list = document.getElementById('offerList');
+    if (!list) return;
+    const offers = read('fragment_offers');
+    list.innerHTML = '';
+    if (!offers.length) {
+      list.innerHTML = '<div class="card muted">Черновиков пока нет.</div>';
+      return;
+    }
+    offers.forEach((o, i) => {
+      const card = document.createElement('div');
+      card.className = 'card';
+      const title = document.createElement('b');
+      title.textContent = o.name;
+      const info = document.createElement('p');
+      info.className = 'muted';
+      info.textContent = 'Цена: ' + o.price + ' TON' + (o.link ? ' · ' + o.link : '');
+      const del = document.createElement('button');
+      del.className = 'secondary';
+      del.textContent = 'Удалить черновик';
+      del.onclick = () => {
+        const current = read('fragment_offers');
+        current.splice(i, 1);
+        localStorage.setItem('fragment_offers', JSON.stringify(current));
+        renderOffers();
+      };
+      card.append(title, info, del);
+      list.appendChild(card);
+    });
+  }
+
+  function saveRule() {
+    const name = document.getElementById('ruleName').value.trim();
+    const price = document.getElementById('rulePrice').value.trim();
+    if (!name || !price) {
+      document.getElementById('ruleStatus').textContent = 'Укажи название и максимальную цену.';
+      return;
+    }
+    const rules = read('fragment_rules');
+    rules.unshift({name, price});
+    localStorage.setItem('fragment_rules', JSON.stringify(rules));
+    document.getElementById('ruleName').value = '';
+    document.getElementById('rulePrice').value = '';
+    document.getElementById('ruleStatus').textContent = 'Правило сохранено.';
+    renderRules();
+  }
+
+  function renderRules() {
+    const list = document.getElementById('ruleList');
+    if (!list) return;
+    const rules = read('fragment_rules');
+    list.innerHTML = '';
+    if (!rules.length) {
+      list.innerHTML = '<div class="card muted">Правил пока нет.</div>';
+      return;
+    }
+    rules.forEach((r, i) => {
+      const card = document.createElement('div');
+      card.className = 'card';
+      const title = document.createElement('b');
+      title.textContent = r.name;
+      const info = document.createElement('p');
+      info.className = 'muted';
+      info.textContent = 'Максимальная цена: ' + r.price + ' TON';
+      const del = document.createElement('button');
+      del.className = 'secondary';
+      del.textContent = 'Удалить правило';
+      del.onclick = () => {
+        const current = read('fragment_rules');
+        current.splice(i, 1);
+        localStorage.setItem('fragment_rules', JSON.stringify(current));
+        renderRules();
+      };
+      card.append(title, info, del);
+      list.appendChild(card);
+    });
+  }
+
+  function clearData() {
+    if (!confirm('Удалить все сохранённые черновики и правила на этом устройстве?')) return;
+    localStorage.removeItem('fragment_offers');
+    localStorage.removeItem('fragment_rules');
+    renderOffers();
+    renderRules();
+    alert('Локальные данные очищены.');
+  }
+
+  renderOffers();
+  renderRules();
+</script>
+</body>
+                                </html>
+  
