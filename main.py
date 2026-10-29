@@ -7,22 +7,20 @@ import os
 import re
 import sqlite3
 import time
-from urllib.parse import parse_qsl
+from urllib.parse import parse_qsl, urlparse
 
-from aiogram import Bot, Dispatcher
+from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart
 from aiogram.types import (
     Message,
     WebAppInfo,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
-    BusinessConnection,
+    CallbackQuery,
 )
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from telethon import TelegramClient, events
-from telethon.sessions import StringSession
 import uvicorn
 
 
@@ -33,20 +31,14 @@ APP_URL = os.getenv("APP_URL", "").strip().rstrip("/")
 PORT = int(os.getenv("PORT", "8000"))
 DB_PATH = os.getenv("DB_PATH", "steknft.db")
 
-API_ID_RAW = os.getenv("API_ID", "").strip()
-API_HASH = os.getenv("API_HASH", "").strip()
-SESSION_STRING = os.getenv("SESSION_STRING", "").strip()
-
 if not BOT_TOKEN:
     raise RuntimeError("Set BOT_TOKEN in environment variables.")
 
-app = FastAPI(title="Fragment Mini App")
+app = FastAPI(title="StekNFT")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 bot = Bot(BOT_TOKEN)
 dp = Dispatcher()
-
-user_client = None
 
 
 # ---------- Database ----------
@@ -86,28 +78,44 @@ def init_db():
             )
         """)
 
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS offers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                chat_id TEXT NOT NULL,
+                nft_link TEXT NOT NULL,
+                nft_name TEXT NOT NULL,
+                price TEXT NOT NULL,
+                currency TEXT NOT NULL,
+                status TEXT DEFAULT 'pending',
+                message_id INTEGER,
+                created_at INTEGER NOT NULL
+            )
+        """)
 
-# ---------- Telegram Mini App validation ----------
 
-def verify_init_data(init_data: str):
+# ---------- Telegram Mini App authentication ----------
+
+def verify_init_data(init_data: str) -> int:
     if not init_data:
         raise HTTPException(
-            401, "Open this app from the Telegram bot."
+            401,
+            "Открой Mini App через Telegram-бота."
         )
 
     values = dict(parse_qsl(init_data, keep_blank_values=True))
     received_hash = values.pop("hash", None)
 
     if not received_hash:
-        raise HTTPException(401, "Missing Telegram signature.")
+        raise HTTPException(401, "Нет подписи Telegram.")
 
     try:
         auth_date = int(values.get("auth_date", "0"))
     except ValueError:
-        raise HTTPException(401, "Invalid Telegram auth date.")
+        raise HTTPException(401, "Некорректная дата авторизации.")
 
     if abs(int(time.time()) - auth_date) > 86400:
-        raise HTTPException(401, "Telegram session expired.")
+        raise HTTPException(401, "Сессия Telegram истекла.")
 
     data_check_string = "\n".join(
         f"{key}={value}"
@@ -120,23 +128,30 @@ def verify_init_data(init_data: str):
         hashlib.sha256,
     ).digest()
 
-    calculated = hmac.new(
+    calculated_hash = hmac.new(
         secret_key,
         data_check_string.encode(),
         hashlib.sha256,
     ).hexdigest()
 
-    if not hmac.compare_digest(calculated, received_hash):
-        raise HTTPException(401, "Invalid Telegram signature.")
+    if not hmac.compare_digest(calculated_hash, received_hash):
+        raise HTTPException(401, "Неверная подпись Telegram.")
 
     try:
         user = json.loads(values["user"])
         return int(user["id"])
-    except Exception:
-        raise HTTPException(401, "Could not read Telegram user.")
+    except (KeyError, ValueError, TypeError, json.JSONDecodeError):
+        raise HTTPException(401, "Не удалось определить пользователя.")
 
 
-def get_settings(user_id):
+async def current_user(request: Request) -> int:
+    init_data = request.headers.get("X-Telegram-Init-Data", "")
+    return verify_init_data(init_data)
+
+
+# ---------- Settings ----------
+
+def get_settings(user_id: int) -> dict:
     with db() as conn:
         conn.execute(
             "INSERT OR IGNORE INTO settings(user_id) VALUES (?)",
@@ -146,15 +161,86 @@ def get_settings(user_id):
             "SELECT * FROM settings WHERE user_id = ?",
             (user_id,),
         ).fetchone()
-        return dict(row)
+
+    return dict(row)
 
 
-async def current_user(request: Request):
-    init_data = request.headers.get("X-Telegram-Init-Data", "")
-    return verify_init_data(init_data)
+# ---------- NFT helpers ----------
+
+def validate_nft_link(link: str) -> bool:
+    try:
+        parsed = urlparse(link)
+    except ValueError:
+        return False
+
+    return (
+        parsed.scheme == "https"
+        and parsed.netloc.lower() == "t.me"
+        and parsed.path.startswith("/nft/")
+        and bool(parsed.path.removeprefix("/nft/").strip("/"))
+        and not parsed.query
+        and not parsed.fragment
+    )
 
 
-# ---------- Bot ----------
+def get_nft_name(link: str) -> str:
+    """
+    Extract a readable name from a Telegram collectible URL.
+    This does not verify ownership or query an official NFT catalogue.
+    """
+    path = urlparse(link).path.rstrip("/")
+    slug = path.rsplit("/", 1)[-1]
+
+    match = re.fullmatch(r"(.+)-(\d+)", slug)
+
+    if match:
+        return f"{match.group(1)} #{match.group(2)}"
+
+    return slug or "NFT по ссылке"
+
+
+# ---------- Keyboards ----------
+
+def offer_keyboard(offer_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="❌ Отклонить",
+                    callback_data=f"offer:reject:{offer_id}",
+                ),
+                InlineKeyboardButton(
+                    text="✅ Принять",
+                    callback_data=f"offer:accept:{offer_id}",
+                ),
+            ]
+        ]
+    )
+
+
+def accepted_keyboard(
+    offer_id: int,
+    nft_link: str,
+) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🎁 Открыть NFT",
+                    url=nft_link,
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📋 Инструкция передачи NFT",
+                    callback_data=f"offer:info:{offer_id}",
+                )
+            ],
+        ]
+    )
+
+
+# ---------- Bot commands ----------
 
 @dp.message(CommandStart())
 async def start(message: Message):
@@ -165,7 +251,7 @@ async def start(message: Message):
             inline_keyboard=[
                 [
                     InlineKeyboardButton(
-                        text="Открыть Fragment",
+                        text="Открыть StekNFT",
                         web_app=WebAppInfo(url=APP_URL),
                     )
                 ]
@@ -173,100 +259,108 @@ async def start(message: Message):
         )
 
     await message.answer(
-        "Привет! Это Fragment.\n\n"
-        "Пример команды для личного аккаунта:\n"
-        "!оффер https://t.me/nft/Example 500 Stars\n\n"
-        "Команда обрабатывается только при работающем "
-        "подключении личного аккаунта.",
+        "Привет! Это StekNFT.\n\n"
+        "Создавай NFT-предложения через Mini App.\n"
+        "Офферы отправляются в чат, указанный в настройках.",
         reply_markup=keyboard,
     )
 
 
-# ---------- Telegram Business diagnostics ----------
+# ---------- Offer callbacks ----------
 
-@dp.business_connection()
-async def on_business_connection(connection: BusinessConnection):
-    print(
-        "BUSINESS CONNECTION:",
-        "id =", connection.id,
-        "enabled =", connection.is_enabled,
-        "rights =", connection.rights,
-        flush=True,
-    )
-
-
-@dp.business_message()
-async def on_business_message(message: Message):
-    print(
-        "BUSINESS MESSAGE:",
-        "chat_id =", message.chat.id,
-        "message_id =", message.message_id,
-        "from_user_id =",
-        message.from_user.id if message.from_user else None,
-        "text =", repr(message.text),
-        "connection_id =", message.business_connection_id,
-        flush=True,
-    )
-
-
-# ---------- Personal-account offer handler ----------
-
-OFFER_PATTERN = re.compile(
-    r"!оффер\s+(https?://\S+)\s+(.+)",
-    flags=re.IGNORECASE | re.DOTALL,
-)
-
-
-async def handle_offer(event):
-    # Process only messages sent by this account in private chats.
-    if not event.is_private or not event.out:
+@dp.callback_query(F.data.startswith("offer:"))
+async def handle_offer_button(callback: CallbackQuery):
+    if not callback.data or not callback.message:
+        await callback.answer()
         return
 
-    text = (event.raw_text or "").strip()
-    match = OFFER_PATTERN.fullmatch(text)
+    parts = callback.data.split(":")
 
-    if not match:
+    if len(parts) != 3:
+        await callback.answer("Некорректная кнопка.", show_alert=True)
         return
 
-    nft_link = match.group(1).strip()
-    price = match.group(2).strip()
-
-    if len(nft_link) > 500 or len(price) > 100:
-        print("Offer ignored: input too long.", flush=True)
-        return
-
-    formatted = (
-        "🎁 NFT OFFER\n\n"
-        f"🔗 NFT: {nft_link}\n"
-        f"💰 Цена: {price}"
-    )
+    _, action, raw_id = parts
 
     try:
-        # Send the replacement first so the original isn't lost
-        # if Telegram rejects the outgoing message.
-        await user_client.send_message(
-            event.chat_id,
-            formatted,
-            link_preview=False,
+        offer_id = int(raw_id)
+    except ValueError:
+        await callback.answer("Оффер не найден.", show_alert=True)
+        return
+
+    with db() as conn:
+        offer = conn.execute(
+            "SELECT * FROM offers WHERE id = ?",
+            (offer_id,),
+        ).fetchone()
+
+    if not offer:
+        await callback.answer("Оффер не найден.", show_alert=True)
+        return
+
+    # Only the recipient chat where this offer was sent
+    # can process its buttons.
+    if str(callback.message.chat.id) != str(offer["chat_id"]):
+        await callback.answer("Эта кнопка предназначена другому чату.", show_alert=True)
+        return
+
+    if action == "info":
+        await callback.answer(
+            "Открой ссылку NFT и проверь условия сделки. "
+            "Не передавай NFT до подтверждения оплаты.",
+            show_alert=True,
+        )
+        return
+
+    if action not in ("accept", "reject"):
+        await callback.answer("Неизвестное действие.", show_alert=True)
+        return
+
+    new_status = "accepted" if action == "accept" else "rejected"
+
+    with db() as conn:
+        cur = conn.execute(
+            """
+            UPDATE offers
+            SET status = ?
+            WHERE id = ? AND status = 'pending'
+            """,
+            (new_status, offer_id),
+        )
+        changed = cur.rowcount
+
+    if changed != 1:
+        await callback.answer(
+            "Этот оффер уже обработан.",
+            show_alert=True,
+        )
+        return
+
+    if action == "accept":
+        text = (
+            "🎁 StekNFT — предложение принято\n\n"
+            f"💎 NFT: {offer['nft_name']}\n"
+            f"💰 Цена: {offer['price']} {offer['currency']}\n\n"
+            "Проверь NFT и условия сделки перед передачей."
         )
 
-        await event.delete()
-
-        print(
-            "Offer replaced successfully:",
-            "chat_id =", event.chat_id,
-            flush=True,
+        await callback.message.edit_text(
+            text,
+            reply_markup=accepted_keyboard(
+                offer_id,
+                offer["nft_link"],
+            ),
+            link_preview_options={"is_disabled": False},
         )
+        await callback.answer("Предложение принято.")
 
-    except Exception as exc:
-        # The original command is not deliberately deleted if
-        # sending the replacement fails.
-        print(
-            "Offer processing error:",
-            type(exc).__name__,
-            str(exc),
-            flush=True,
+    else:
+        await callback.message.edit_text(
+            "❌ Предложение StekNFT отклонено.\n\n"
+            f"💎 NFT: {offer['nft_name']}\n"
+            f"💰 Цена: {offer['price']} {offer['currency']}"
         )
+        await callback.answer("Предложение отклонено.")
 
 
 # ---------- Web app ----------
@@ -278,7 +372,7 @@ async def index():
 
 @app.get("/api/health")
 async def health():
-    return {"ok": True, "service": "fragment-starter"}
+    return {"ok": True, "service": "StekNFT"}
 
 
 @app.get("/api/settings")
@@ -319,16 +413,16 @@ async def save_settings(request: Request):
             clean[key] = value[:500]
 
     if clean.get("language") not in (None, "RU", "EN"):
-        raise HTTPException(400, "Unsupported language")
+        raise HTTPException(400, "Неизвестный язык.")
 
     if clean.get("text_style") not in (None, "default", "original"):
-        raise HTTPException(400, "Unsupported text style")
+        raise HTTPException(400, "Неизвестный стиль.")
 
     if clean.get("buttons_layout") not in (None, "side", "stacked"):
-        raise HTTPException(400, "Unsupported button layout")
+        raise HTTPException(400, "Неизвестное расположение кнопок.")
 
     if clean.get("image_position") not in (None, "above", "below"):
-        raise HTTPException(400, "Unsupported image position")
+        raise HTTPException(400, "Неизвестное расположение изображения.")
 
     if clean:
         columns = ", ".join(f"{key}=?" for key in clean)
@@ -351,37 +445,113 @@ async def create_draft(request: Request):
     user_id = await current_user(request)
     data = await request.json()
 
-    links = str(data.get("links", "")).strip()
+    nft_link = str(data.get("links", "")).strip()
     price = str(data.get("price", "")).strip()
     currency = str(data.get("currency", "Stars")).strip()
 
-    if not links or not price:
-        raise HTTPException(
-            400, "Укажи ссылку на подарок и цену."
-        )
+    if not nft_link or not price:
+        raise HTTPException(400, "Укажи ссылку на NFT и цену.")
 
     if currency not in ("Stars", "GRAM", "USDT"):
         raise HTTPException(400, "Неизвестная валюта.")
 
-    if len(links) > 5000 or len(price) > 40:
+    if len(nft_link) > 500 or len(price) > 40:
         raise HTTPException(400, "Слишком длинное значение.")
+
+    if not validate_nft_link(nft_link):
+        raise HTTPException(
+            400,
+            "Укажи ссылку вида https://t.me/nft/Название-12345",
+        )
+
+    settings = get_settings(user_id)
+    receiver = str(settings.get("receiver", "")).strip()
+
+    if not receiver:
+        raise HTTPException(
+            400,
+            "Сначала укажи получателя в настройках StekNFT.",
+        )
+
+    nft_name = get_nft_name(nft_link)
 
     with db() as conn:
         cur = conn.execute(
-            "INSERT INTO drafts"
-            "(user_id, links, price, currency, created_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (user_id, links, price, currency, int(time.time())),
+            """
+            INSERT INTO offers
+            (user_id, chat_id, nft_link, nft_name, price,
+             currency, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
+            """,
+            (
+                user_id,
+                receiver,
+                nft_link,
+                nft_name,
+                price,
+                currency,
+                int(time.time()),
+            ),
         )
-        draft_id = cur.lastrowid
+        offer_id = cur.lastrowid
+
+    message_text = (
+        "🎁 StekNFT — предложение NFT\n\n"
+        f"💎 NFT: {nft_name}\n"
+        f"🔗 Ссылка: {nft_link}\n"
+        f"💰 Цена: {price} {currency}\n\n"
+        "Предложение создано через StekNFT."
+    )
+
+    try:
+        sent = await bot.send_message(
+            chat_id=receiver,
+            text=message_text,
+            reply_markup=offer_keyboard(offer_id),
+            link_preview_options={"is_disabled": False},
+        )
+    except Exception as exc:
+        print(
+            "Offer send error:",
+            type(exc).__name__,
+            str(exc),
+            flush=True,
+        )
+
+        with db() as conn:
+            conn.execute(
+                "UPDATE offers SET status = 'send_failed' WHERE id = ?",
+                (offer_id,),
+            )
+
+        raise HTTPException(
+            502,
+            "Не удалось отправить оффер. Проверь получателя "
+            "и доступ бота к чату.",
+        )
+
+    with db() as conn:
+        conn.execute(
+            "UPDATE offers SET message_id = ? WHERE id = ?",
+            (sent.message_id, offer_id),
+        )
+
+        # Keep a copy in the drafts history as well.
+        conn.execute(
+            """
+            INSERT INTO drafts
+            (user_id, links, price, currency, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (user_id, nft_link, price, currency, int(time.time())),
+        )
 
     return {
         "ok": True,
-        "draft_id": draft_id,
-        "links": links,
-        "price": price,
-        "currency": currency,
-        "note": "Черновик сохранён. Это не отправленный оффер.",
+        "offer_id": offer_id,
+        "nft_name": nft_name,
+        "sent": True,
+        "message": "Оффер отправлен ботом StekNFT.",
     }
 
 
@@ -391,59 +561,43 @@ async def list_drafts(request: Request):
 
     with db() as conn:
         rows = conn.execute(
-            "SELECT id, links, price, currency, created_at "
-            "FROM drafts WHERE user_id=? "
-            "ORDER BY id DESC LIMIT 30",
+            """
+            SELECT id, links, price, currency, created_at
+            FROM drafts
+            WHERE user_id = ?
+            ORDER BY id DESC
+            LIMIT 30
+            """,
             (user_id,),
         ).fetchall()
 
     return {"drafts": [dict(row) for row in rows]}
 
 
+@app.get("/api/offers")
+async def list_offers(request: Request):
+    user_id = await current_user(request)
+
+    with db() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, nft_link, nft_name, price, currency,
+                   status, created_at
+            FROM offers
+            WHERE user_id = ?
+            ORDER BY id DESC
+            LIMIT 30
+            """,
+            (user_id,),
+        ).fetchall()
+
+    return {"offers": [dict(row) for row in rows]}
+
+
 # ---------- Startup ----------
 
 async def main():
-    global user_client
-
     init_db()
-
-    if API_ID_RAW and API_HASH and SESSION_STRING:
-        try:
-            api_id = int(API_ID_RAW)
-        except ValueError:
-            raise RuntimeError("API_ID must be an integer.")
-
-        user_client = TelegramClient(
-            StringSession(SESSION_STRING),
-            api_id,
-            API_HASH,
-        )
-
-        await user_client.connect()
-
-        if not await user_client.is_user_authorized():
-            await user_client.disconnect()
-            raise RuntimeError(
-                "SESSION_STRING is not authorized. "
-                "Create a new session and update Render."
-            )
-
-        user_client.add_event_handler(
-            handle_offer,
-            events.NewMessage(outgoing=True, incoming=False),
-        )
-
-        print(
-            "Personal Telegram account connected. "
-            "Offer handler is active.",
-            flush=True,
-        )
-    else:
-        print(
-            "WARNING: Personal-account automation is disabled. "
-            "Set API_ID, API_HASH and SESSION_STRING in Render.",
-            flush=True,
-        )
 
     config = uvicorn.Config(
         app,
@@ -463,11 +617,6 @@ async def main():
         asyncio.create_task(server.serve()),
     ]
 
-    if user_client is not None:
-        tasks.append(
-            asyncio.create_task(user_client.run_until_disconnected())
-        )
-
     try:
         await asyncio.gather(*tasks)
     finally:
@@ -476,10 +625,6 @@ async def main():
                 task.cancel()
 
         await asyncio.gather(*tasks, return_exceptions=True)
-
-        if user_client is not None:
-            await user_client.disconnect()
-
         await bot.session.close()
 
 
